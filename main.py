@@ -2,14 +2,8 @@ import os
 import re
 import json
 import time
-import html
 import urllib.request
 import urllib.parse
-
-
-# ============================================================
-# НАСТРОЙКИ
-# ============================================================
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 
@@ -24,19 +18,10 @@ ADMIN_IDS = {
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}/"
 
-
-# ============================================================
-# ДАННЫЕ
-# ============================================================
-
 user_states = {}
 user_posts = {}
 flood_data = {}
 
-
-# ============================================================
-# TELEGRAM API
-# ============================================================
 
 def api(method, data=None):
     if not TOKEN:
@@ -46,15 +31,12 @@ def api(method, data=None):
     if data is None:
         data = {}
 
-    encoded = urllib.parse.urlencode(data).encode("utf-8")
-
     try:
+        encoded = urllib.parse.urlencode(data).encode("utf-8")
         request = urllib.request.Request(
             API_URL + method,
             data=encoded,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded"
-            }
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
 
         with urllib.request.urlopen(request, timeout=30) as response:
@@ -71,26 +53,7 @@ def send_message(chat_id, text, reply_markup=None, message_thread_id=None):
         "text": text,
     }
 
-    if reply_markup:
-        data["reply_markup"] = json.dumps(
-            reply_markup,
-            ensure_ascii=False
-        )
-
-    if message_thread_id is not None:
-        data["message_thread_id"] = message_thread_id
-
-    return api("sendMessage", data)
-
-
-def send_html_message(chat_id, text, reply_markup=None, message_thread_id=None):
-    data = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-    }
-
-    if reply_markup:
+    if reply_markup is not None:
         data["reply_markup"] = json.dumps(
             reply_markup,
             ensure_ascii=False
@@ -109,13 +72,40 @@ def edit_message(chat_id, message_id, text, reply_markup=None):
         "text": text,
     }
 
-    if reply_markup:
+    if reply_markup is not None:
         data["reply_markup"] = json.dumps(
             reply_markup,
             ensure_ascii=False
         )
 
     return api("editMessageText", data)
+
+
+def send_photo(
+    chat_id,
+    photo,
+    caption=None,
+    reply_markup=None,
+    message_thread_id=None
+):
+    data = {
+        "chat_id": chat_id,
+        "photo": photo,
+    }
+
+    if caption:
+        data["caption"] = caption
+
+    if reply_markup is not None:
+        data["reply_markup"] = json.dumps(
+            reply_markup,
+            ensure_ascii=False
+        )
+
+    if message_thread_id is not None:
+        data["message_thread_id"] = message_thread_id
+
+    return api("sendPhoto", data)
 
 
 def delete_message(chat_id, message_id):
@@ -173,22 +163,22 @@ def get_chat(chat_id):
     )
 
 
-# ============================================================
-# АДМИНЫ
-# ============================================================
-
-def is_admin(user_id):
-    return user_id in ADMIN_IDS
-
-
-def is_chat_admin(chat_id, user_id):
-    result = api(
+def get_chat_member(chat_id, user_id):
+    return api(
         "getChatMember",
         {
             "chat_id": chat_id,
             "user_id": user_id,
         }
     )
+
+
+def is_admin(user_id):
+    return user_id in ADMIN_IDS
+
+
+def is_chat_admin(chat_id, user_id):
+    result = get_chat_member(chat_id, user_id)
 
     if not result or not result.get("ok"):
         return False
@@ -198,15 +188,64 @@ def is_chat_admin(chat_id, user_id):
     return status in ("administrator", "creator")
 
 
-# ============================================================
-# КЛАВИАТУРЫ
-# ============================================================
-
 def main_menu():
     return {
         "keyboard": [
             [{"text": "📢 Подать объявление"}],
-            [{"text": "📋 Правила"}, {"text": "❓ Помощь"}],
+            [
+                {"text": "📋 Правила"},
+                {"text": "❓ Помощь"}
+            ],
+        ],
+        "resize_keyboard": True,
+    }
+
+
+def text_step_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "❌ Отменить"}],
+        ],
+        "resize_keyboard": True,
+    }
+
+
+def photo_step_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "➡️ Без фото"}],
+            [{"text": "❌ Отменить"}],
+        ],
+        "resize_keyboard": True,
+    }
+
+
+def photo_more_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "➡️ Готово"}],
+            [{"text": "❌ Отменить"}],
+        ],
+        "resize_keyboard": True,
+    }
+
+
+def price_step_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "➡️ Цена договорная"}],
+            [{"text": "➡️ Без цены"}],
+            [{"text": "❌ Отменить"}],
+        ],
+        "resize_keyboard": True,
+    }
+
+
+def contact_step_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "➡️ Без контакта"}],
+            [{"text": "❌ Отменить"}],
         ],
         "resize_keyboard": True,
     }
@@ -235,155 +274,149 @@ def moderation_keyboard(post_id):
     }
 
 
+def preview_keyboard(post_id):
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "✅ Отправить на модерацию",
+                    "callback_data": f"submit:{post_id}",
+                }
+            ],
+            [
+                {
+                    "text": "❌ Отменить",
+                    "callback_data": f"cancel:{post_id}",
+                }
+            ],
+        ]
+    }
+
+
 def baraholka_button():
     return {
         "inline_keyboard": [
             [
                 {
                     "text": "📢 Подать объявление",
-                    "url": "https://t.me/NhaTrangFairBaraholkaBot?start=newpost",
+                    "url": (
+                        "https://t.me/"
+                        "NhaTrangFairBaraholkaBot?start=newpost"
+                    ),
                 }
             ]
         ]
     }
 
 
-# ============================================================
-# ФИЛЬТР
-# ============================================================
-
 def normalize(text):
     text = text.lower().replace("ё", "е")
-    text = re.sub(r"[\u200b\u200c\u200d]", "", text)
+    text = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", text)
+    text = text.replace("—", "-").replace("–", "-")
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
 
 def forbidden_reason(text):
     text = normalize(text)
+
+    if not text:
+        return None
+
     compact = re.sub(r"[\s\-_]+", "", text)
 
-    # --------------------------------------------------------
-    # АРЕНДА ЖИЛЬЯ
-    # --------------------------------------------------------
+    housing_words = (
+        r"(?:квартир\w*|апартамент\w*|студи\w*|комнат\w*|"
+        r"дом\w*|вилл\w*|жиль\w*|кондо|condo|apartment|"
+        r"studio|room|house|villa)"
+    )
 
-    rental_words = (
-        r"(?:сда(?:ю|ем|ет|ется|еться)|сдается|сдам|"
-        r"снять|сниму|снимаю|аренд\w*|"
+    housing_rental_context = (
+        r"(?:rent|rental|for\s+rent|renting|"
+        r"аренд\w*|сда(?:ю|ем|ет|ется|еться)|"
+        r"сдается|сдам|снять|сниму|снимаю|"
         r"посуточн\w*|помесячн\w*|долгосрочн\w*|"
         r"на\s+(?:день|сутки|недел\w*|месяц)|"
-        r"rent|rental|for\s+rent|renting|"
         r"cho\s*thu[eê]|thu[eê])"
     )
 
-    housing_words = (
-        r"(?:квартир\w*|апартамент\w*|студи\w*|"
-        r"комнат\w*|дом\w*|вилл\w*|жиль\w*|кондо|"
-        r"condo|apartment|studio|room|house|villa)"
-    )
-
     if re.search(
-        rf"{rental_words}.{{0,100}}{housing_words}",
+        rf"{housing_rental_context}.{{0,120}}{housing_words}",
         text,
-        re.I,
+        re.I
     ):
         return "аренда квартир/домов"
 
     if re.search(
-        rf"{housing_words}.{{0,100}}{rental_words}",
+        rf"{housing_words}.{{0,120}}{housing_rental_context}",
         text,
-        re.I,
+        re.I
     ):
         return "аренда квартир/домов"
 
     if re.search(
-        r"\bcho\s*thu[eê]\b.{0,100}"
-        r"\b(?:căn|can|hộ|ho|nhà|phòng|studio|villa)\b",
+        r"\bcho\s*thu[eê]\b.{0,120}"
+        r"\b(?:căn\s*hộ|can\s*ho|nhà|phòng|"
+        r"studio|villa|chung\s*cư)\b",
         text,
-        re.I,
+        re.I
     ):
         return "аренда квартир/домов"
 
     if re.search(
-        r"\b(?:căn\s*hộ|can\s*ho|nhà|phòng|studio|villa)\b"
-        r".{0,100}\b(?:cho\s*thu[eê]|thu[eê])\b",
+        r"\b(?:căn\s*hộ|can\s*ho|nhà|phòng|"
+        r"studio|villa|chung\s*cư)\b.{0,120}"
+        r"\b(?:cho\s*thu[eê]|thu[eê])\b",
         text,
-        re.I,
+        re.I
     ):
         return "аренда квартир/домов"
 
-    # Популярные варианты без расстояния между словами
-    if re.search(
-        r"\b(?:сдается|сдам|сдаю)\b.{0,100}"
-        r"\b(?:студи\w*|квартир\w*|апартамент\w*|"
-        r"комнат\w*|дом\w*|вилл\w*)\b",
-        text,
-        re.I,
-    ):
-        return "аренда квартир/домов"
+    bike_rental_alone = [
+        r"\brent\b",
+        r"\brental\b",
+        r"\bfor\s+rent\b",
+        r"\brenting\b",
+    ]
 
-    if re.search(
-        r"\b(?:студи\w*|квартир\w*|апартамент\w*|"
-        r"комнат\w*|дом\w*|вилл\w*)\b.{0,100}"
-        r"\b(?:сдается|сдам|сдаю)\b",
-        text,
-        re.I,
-    ):
-        return "аренда квартир/домов"
-
-    # --------------------------------------------------------
-    # АРЕНДА МОТОБАЙКОВ
-    # --------------------------------------------------------
-
-    bike_rental = (
-        r"(?:аренд\w*|сдам|сдается|сдаю|прокат\w*|"
-        r"rent|rental|for\s+rent|renting|"
-        r"на\s+(?:день|сутки|недел\w*|месяц)|"
-        r"посуточн\w*|помесячн\w*|"
-        r"cho\s*thu[eê]|thu[eê])"
-    )
+    for pattern in bike_rental_alone:
+        if re.search(pattern, text, re.I):
+            return "аренда мотобайков"
 
     bike_words = (
-        r"(?:байк\w*|мотобайк\w*|мотоцикл\w*|"
-        r"мото\w*|скутер\w*|мопед\w*|"
-        r"bike|motorbike|motor\s*bike|scooter|"
-        r"xe\s*m[aá]y|xe|pcx|airblade|vario|"
+        r"(?:байк\w*|мотобайк\w*|мотоцикл\w*|мото\w*|"
+        r"скутер\w*|мопед\w*|bike|motorbike|motor\s*bike|"
+        r"scooter|xe\s*m[aá]y|xe|pcx|airblade|vario|"
         r"vision|lead|nvx|adv|xmax)"
     )
 
+    bike_rental_context = (
+        r"(?:rent|rental|for\s+rent|renting|"
+        r"аренд\w*|сдам|сдаю|сдается|сдаеться|"
+        r"прокат\w*|посуточн\w*|помесячн\w*|"
+        r"на\s+(?:день|сутки|недел\w*|месяц)|"
+        r"cho\s*thu[eê]|thu[eê])"
+    )
+
     if re.search(
-        rf"{bike_rental}.{{0,80}}{bike_words}",
+        rf"{bike_rental_context}.{{0,100}}{bike_words}",
         text,
-        re.I,
+        re.I
     ):
         return "аренда мотобайков"
 
     if re.search(
-        rf"{bike_words}.{{0,80}}{bike_rental}",
+        rf"{bike_words}.{{0,100}}{bike_rental_context}",
         text,
-        re.I,
+        re.I
     ):
         return "аренда мотобайков"
 
     if re.search(
-        r"\bcho\s*thu[eê]\s+(?:xe\s*m[aá]y|xe)\b",
-        text,
-        re.I,
-    ):
-        return "аренда мотобайков"
-
-    if re.search(
-        r"\b(?:xe\s*m[aá]y|xe)\s+cho\s*thu[eê]\b",
-        text,
-        re.I,
-    ):
-        return "аренда мотобайков"
-
-    if re.search(
-        r"\b(?:bike|motorbike|motor\s*bike|scooter)"
+        r"\b(?:bike|motorbike|motor\s*bike|scooter)\b"
         r"\s+(?:rental|for\s+rent)\b",
         text,
-        re.I,
+        re.I
     ):
         return "аренда мотобайков"
 
@@ -391,49 +424,72 @@ def forbidden_reason(text):
         r"\b(?:rent|rental)\s+(?:a\s+)?"
         r"(?:bike|motorbike|scooter)\b",
         text,
-        re.I,
+        re.I
     ):
         return "аренда мотобайков"
 
-    # --------------------------------------------------------
-    # ОБМЕН ВАЛЮТ
-    # --------------------------------------------------------
+    if re.search(
+        r"\bcho\s*thu[eê]\s+(?:xe\s*m[aá]y|xe)\b",
+        text,
+        re.I
+    ):
+        return "аренда мотобайков"
 
-    exchange_words = (
-        r"(?:обмен\w*|обменя\w*|меняю|поменя\w*|"
-        r"currency\s+exchange|money\s+exchange|exchange|"
-        r"đổi\s+tiền|doi\s+tien|"
-        r"đổi\s+ngoại\s+tệ|doi\s+ngoai\s+te|"
-        r"mua\s+b[aá]n\s+ngo[aạ]i\s+t[eê])"
-    )
+    if re.search(
+        r"\b(?:xe\s*m[aá]y|xe)\s+cho\s*thu[eê]\b",
+        text,
+        re.I
+    ):
+        return "аренда мотобайков"
+
+    generic_rental_alone = [
+        r"\bсдам\b",
+        r"\bсдаю\b",
+        r"\bсдается\b",
+        r"\bсдаеться\b",
+        r"\bаренда\b",
+        r"\bснять\b",
+        r"\bсниму\b",
+        r"\bснимаю\b",
+        r"\bпосуточно\b",
+        r"\bпомесячно\b",
+        r"\bдолгосрочно\b",
+        r"\bпрокат\w*\b",
+    ]
+
+    for pattern in generic_rental_alone:
+        if re.search(pattern, text, re.I):
+            return "аренда квартир/домов"
+
+    exchange_alone = [
+        r"\bобмен\b",
+        r"\bобменять\b",
+        r"\bобменяю\b",
+        r"\bобменя\b",
+        r"\bменяю\b",
+        r"\bпоменяю\b",
+        r"\bexchange\b",
+        r"\bcurrency\s+exchange\b",
+        r"\bmoney\s+exchange\b",
+    ]
+
+    for pattern in exchange_alone:
+        if re.search(pattern, text, re.I):
+            return "обмен валют"
 
     currency_words = (
-        r"(?:валют\w*|деньг\w*|рубл\w*|доллар\w*|"
-        r"донг\w*|евро\w*|usdt|usd|rub|vnd|eur|"
-        r"rmb|юан\w*|тенге\w*|currency|money|"
-        r"foreign\s+currency|ngoại\s+tệ|ngoai\s+te)"
+        r"(?:валют\w*|деньг\w*|рубл\w*|доллар\w*|донг\w*|"
+        r"евро\w*|usdt|usd|rub|vnd|eur|rmb|юан\w*|"
+        r"тенге\w*|currency|money|foreign\s+currency|"
+        r"ngoại\s+tệ|ngoai\s+te)"
     )
-
-    if re.search(
-        rf"{exchange_words}.{{0,80}}{currency_words}",
-        text,
-        re.I,
-    ):
-        return "обмен валют"
-
-    if re.search(
-        rf"{currency_words}.{{0,80}}{exchange_words}",
-        text,
-        re.I,
-    ):
-        return "обмен валют"
 
     if re.search(
         r"(?:рубл\w*|доллар\w*|евро\w*|донг\w*|usd|rub|vnd|eur)"
-        r".{0,40}(?:на|в|по)\s+"
+        r".{0,50}(?:на|в|по)\s+"
         r"(?:рубл\w*|доллар\w*|евро\w*|донг\w*|usd|rub|vnd|eur)",
         text,
-        re.I,
+        re.I
     ):
         return "обмен валют"
 
@@ -442,31 +498,49 @@ def forbidden_reason(text):
         r"\s*[/\-]\s*"
         r"(?:usd|rub|vnd|eur|usdt|rmb)",
         text,
-        re.I,
+        re.I
     ) and re.search(
-        r"(?:обмен|курс|меняю|поменя|куплю|продам|"
-        r"exchange|rate|обменять)",
+        r"(?:курс|rate|куплю|продам|обмен|обменять|"
+        r"меняю|поменяю|exchange)",
         text,
-        re.I,
+        re.I
     ):
         return "обмен валют"
 
-    # --------------------------------------------------------
-    # КАЗИНО / СТАВКИ
-    # --------------------------------------------------------
+    if re.search(
+        r"(?:đổi\s+tiền|doi\s+tien|"
+        r"đổi\s+ngoại\s+tệ|doi\s+ngoai\s+te|"
+        r"mua\s+b[aá]n\s+ngo[aạ]i\s+t[eê])",
+        text,
+        re.I
+    ):
+        return "обмен валют"
 
     if re.search(
-        r"\b(?:казино|casino|ставк\w*|betting|"
-        r"sportsbook|1xbet|pin\s*up|pinup|bet|"
-        r"букмекер\w*)\b",
+        rf"{currency_words}.{{0,80}}"
+        r"(?:курс|rate|обмен|exchange|đổi)",
         text,
-        re.I,
+        re.I
+    ):
+        return "обмен валют"
+
+    if re.search(
+        r"(?:курс|rate|обмен|exchange|đổi).{0,80}"
+        rf"{currency_words}",
+        text,
+        re.I
+    ):
+        return "обмен валют"
+
+    if re.search(
+        r"(?:\bказино\b|\bcasino\b|\bставк\w*\b|"
+        r"\bbetting\b|\bsportsbook\b|\b1xbet\b|"
+        r"\bpin\s*up\b|\bpinup\b|\bbet\b|"
+        r"\bбукмекер\w*\b)",
+        text,
+        re.I
     ):
         return "казино/ставки"
-
-    # --------------------------------------------------------
-    # КРИПТОРЕКЛАМА
-    # --------------------------------------------------------
 
     crypto = (
         r"(?:крипт\w*|crypto|usdt|bitcoin|btc|"
@@ -474,44 +548,45 @@ def forbidden_reason(text):
     )
 
     crypto_promo = (
-        r"(?:заработ\w*|инвест\w*|доход\w*|"
-        r"прибыл\w*|profit|income|invest\w*|"
-        r"сигнал\w*|гарант\w*|пассивн\w*|"
-        r"трейдинг|trading)"
+        r"(?:заработ\w*|инвест\w*|доход\w*|прибыл\w*|"
+        r"profit|income|invest\w*|сигнал\w*|гарант\w*|"
+        r"пассивн\w*|трейдинг|trading)"
     )
 
     if re.search(
         rf"{crypto}.{{0,80}}{crypto_promo}",
         text,
-        re.I,
+        re.I
     ):
         return "криптореклама"
 
     if re.search(
         rf"{crypto_promo}.{{0,80}}{crypto}",
         text,
-        re.I,
+        re.I
     ):
         return "криптореклама"
 
-    # --------------------------------------------------------
-    # ССЫЛКИ
-    # --------------------------------------------------------
+    link_patterns = [
+        r"https?://",
+        r"www\.",
+        r"t\.me/",
+        r"telegram\.me/",
+        r"telegram\.dog/",
+        r"wa\.me/",
+        r"chat\.whatsapp\.com/",
+        r"discord\.gg/",
+        r"vk\.com/",
+        r"instagram\.com/",
+        r"facebook\.com/",
+        r"youtube\.com/",
+        r"youtu\.be/",
+    ]
 
-    link_pattern = (
-        r"(?:https?://|www\.|"
-        r"t\.me/|telegram\.me/|telegram\.dog/|"
-        r"wa\.me/|chat\.whatsapp\.com/|"
-        r"discord\.gg/|vk\.com/)"
-    )
+    for pattern in link_patterns:
+        if re.search(pattern, text, re.I):
+            return "ссылка"
 
-    if re.search(link_pattern, text, re.I):
-        return "ссылка"
-
-    if re.search(link_pattern, compact, re.I):
-        return "ссылка"
-
-    # Скрытые ссылки: t . me /..., telegram . me /..., wa . me /...
     if re.search(r"\bt\s*\.\s*me\s*/", text, re.I):
         return "ссылка"
 
@@ -521,54 +596,50 @@ def forbidden_reason(text):
     if re.search(r"\bwa\s*\.\s*me\s*/", text, re.I):
         return "ссылка"
 
-    # --------------------------------------------------------
-    # РЕКЛАМА СВОИХ ГРУПП / КАНАЛОВ
-    # --------------------------------------------------------
+    if re.search(r"t\s*\.\s*me", text, re.I):
+        return "ссылка"
+
+    if re.search(r"telegram\s*\.\s*me", text, re.I):
+        return "ссылка"
+
+    if re.search(r"wa\s*\.\s*me", text, re.I):
+        return "ссылка"
 
     group_promo = [
         r"\bнаша\s+групп\w*",
         r"\bнаши\s+групп\w*",
         r"\bнаш\s+канал\w*",
         r"\bнаши\s+канал\w*",
-        r"\bвступайте\s+в\s+(?:нашу\s+|наши\s+)?"
-        r"(?:групп\w*|канал\w*)",
-        r"\bвступить\s+в\s+(?:нашу\s+|наши\s+)?"
-        r"(?:групп\w*|канал\w*)",
-        r"\bподписывайтесь\s+на\s+(?:канал\w*|групп\w*)",
-        r"\bподпишитесь\s+на\s+(?:канал\w*|групп\w*)",
+        r"\bвступайте\s+в\s+(?:нашу\s+|наши\s+)?(?:групп\w*|канал\w*|чат\w*)",
+        r"\bвступить\s+в\s+(?:нашу\s+|наши\s+)?(?:групп\w*|канал\w*|чат\w*)",
+        r"\bподписывайтесь\s+на\s+(?:канал\w*|групп\w*|чат\w*)",
+        r"\bподпишитесь\s+на\s+(?:канал\w*|групп\w*|чат\w*)",
         r"\bтелеграм\s+(?:канал|группа|группу|чат)\b",
         r"\btelegram\s+(?:channel|group|chat)\b",
         r"\bjoin\s+(?:our\s+)?(?:group|channel|chat)\b",
         r"\bнаш\s+(?:telegram|телеграм)\b",
         r"\bссылка\s+на\s+(?:групп\w*|канал\w*|телеграм)\b",
-        r"\bзаходите\s+в\s+(?:нашу\s+|наш\s+)?"
-        r"(?:групп\w*|канал\w*|чат\w*)",
-        r"\bпереходите\s+в\s+(?:нашу\s+|наш\s+)?"
-        r"(?:групп\w*|канал\w*|чат\w*)",
+        r"\bзаходите\s+в\s+(?:нашу\s+|наш\s+)?(?:групп\w*|канал\w*|чат\w*)",
+        r"\bпереходите\s+в\s+(?:нашу\s+|наш\s+)?(?:групп\w*|канал\w*|чат\w*)",
+        r"\bприсоединяйтесь\s+к\s+(?:нашей\s+|нашему\s+|нашу\s+)?(?:групп\w*|канал\w*|чату|группе)",
+        r"\bссылка\s+в\s+профиле\b",
+        r"\blink\s+in\s+bio\b",
     ]
 
     for pattern in group_promo:
         if re.search(pattern, text, re.I):
             return "реклама групп/каналов"
 
-    # --------------------------------------------------------
-    # ОБЩАЯ РЕКЛАМА
-    # --------------------------------------------------------
-
     if re.search(
         r"\b(?:реклама|рекламн\w*|advertising|"
         r"advertisement|promo|promotion)\b",
         text,
-        re.I,
+        re.I
     ):
         return "реклама"
 
     return None
 
-
-# ============================================================
-# FLOOD
-# ============================================================
 
 def flood_check(user_id):
     now = time.time()
@@ -585,12 +656,9 @@ def flood_check(user_id):
         return False
 
     history.append(now)
+
     return True
 
-
-# ============================================================
-# СОЗДАНИЕ ОБЪЯВЛЕНИЯ
-# ============================================================
 
 def create_post(user_id):
     user_posts[user_id] = {
@@ -602,33 +670,45 @@ def create_post(user_id):
     }
 
 
-# ============================================================
-# ПРЕДПРОСМОТР
-# ============================================================
+def reset_user(user_id):
+    user_states.pop(user_id, None)
+    user_posts.pop(user_id, None)
+
 
 def build_preview(post):
-    text = html.escape(post.get("text", ""))
-    price = html.escape(post.get("price", ""))
-    contact = html.escape(post.get("contact", ""))
+    text = post.get("text", "")
+    price = post.get("price", "")
+    contact = post.get("contact", "")
+    photos = post.get("photos", [])
 
-    preview = (
-        "👀 <b>Предпросмотр</b>\n\n"
+    result = (
+        "👀 ПРЕДПРОСМОТР\n\n"
         f"{text}\n\n"
         f"💰 Цена: {price}\n"
         f"📞 Контакт: {contact}"
     )
 
-    photos = post.get("photos", [])
-
     if photos:
-        preview += f"\n\n📷 Фото: {len(photos)}"
+        result += f"\n\n📷 Фото: {len(photos)}"
 
-    return preview
+    return result
 
 
-# ============================================================
-# ПУБЛИКАЦИЯ
-# ============================================================
+def build_public_post(post):
+    text = post.get("text", "").strip()
+    price = post.get("price", "").strip()
+    contact = post.get("contact", "").strip()
+
+    result = text
+
+    if price:
+        result += f"\n\n💰 Цена: {price}"
+
+    if contact:
+        result += f"\n📞 Контакт: {contact}"
+
+    return result
+
 
 def publish_post(post_id):
     post = user_posts.get(post_id)
@@ -636,65 +716,42 @@ def publish_post(post_id):
     if not post:
         return None
 
-    text = html.escape(post.get("text", ""))
-
-    price = html.escape(
-        post.get("price", "")
-    )
-
-    contact = html.escape(
-        post.get("contact", "")
-    )
-
-    caption = (
-        f"{text}\n\n"
-        f"💰 Цена: {price}\n"
-        f"📞 Контакт: {contact}"
-    )
-
+    public_text = build_public_post(post)
     photos = post.get("photos", [])
 
     if photos:
-        result = api(
-            "sendPhoto",
-            {
-                "chat_id": GROUP_ID,
-                "message_thread_id": GROUP_THREAD_ID,
-                "photo": photos[0],
-                "caption": caption,
-                "parse_mode": "HTML",
-                "reply_markup": json.dumps(
-                    baraholka_button(),
-                    ensure_ascii=False,
-                ),
-            },
+        result = send_photo(
+            GROUP_ID,
+            photos[0],
+            caption=public_text,
+            reply_markup=baraholka_button(),
+            message_thread_id=GROUP_THREAD_ID,
         )
 
-        # Если есть дополнительные фото — отправляем их отдельными сообщениями
-        if result and result.get("ok") and len(photos) > 1:
-            for photo_id in photos[1:]:
-                api(
-                    "sendPhoto",
-                    {
-                        "chat_id": GROUP_ID,
-                        "message_thread_id": GROUP_THREAD_ID,
-                        "photo": photo_id,
-                    },
+        if not result or not result.get("ok"):
+            return result
+
+        for photo_id in photos[1:]:
+            extra = send_photo(
+                GROUP_ID,
+                photo_id,
+                message_thread_id=GROUP_THREAD_ID,
+            )
+
+            if not extra or not extra.get("ok"):
+                print(
+                    "WARNING: не удалось опубликовать дополнительное фото"
                 )
 
         return result
 
-    return send_html_message(
+    return send_message(
         GROUP_ID,
-        caption,
+        public_text,
         baraholka_button(),
         GROUP_THREAD_ID,
     )
 
-
-# ============================================================
-# МОДЕРАЦИЯ
-# ============================================================
 
 def send_moderation(user_id):
     post = user_posts.get(user_id)
@@ -702,23 +759,11 @@ def send_moderation(user_id):
     if not post:
         return False
 
-    text = html.escape(
-        post.get("text", "")
-    )
-
-    price = html.escape(
-        post.get("price", "")
-    )
-
-    contact = html.escape(
-        post.get("contact", "")
-    )
-
     moderation_text = (
-        "📢 <b>Новое объявление</b>\n\n"
-        f"{text}\n\n"
-        f"💰 Цена: {price}\n"
-        f"📞 Контакт: {contact}"
+        "📢 НОВОЕ ОБЪЯВЛЕНИЕ\n\n"
+        f"{post.get('text', '')}\n\n"
+        f"💰 Цена: {post.get('price', '')}\n"
+        f"📞 Контакт: {post.get('contact', '')}"
     )
 
     photos = post.get("photos", [])
@@ -729,7 +774,7 @@ def send_moderation(user_id):
     success = False
 
     for admin_id in ADMIN_IDS:
-        result = send_html_message(
+        result = send_message(
             admin_id,
             moderation_text,
             moderation_keyboard(user_id),
@@ -738,31 +783,30 @@ def send_moderation(user_id):
         if result and result.get("ok"):
             success = True
 
+        for photo_id in photos:
+            send_photo(
+                admin_id,
+                photo_id,
+            )
+
     return success
 
 
-# ============================================================
-# КНОПКА В ТЕМЕ БАРАХОЛКА
-# ============================================================
-
 def ensure_baraholka_button():
-    # Проверяем, что бот имеет доступ к группе.
     chat = get_chat(GROUP_ID)
 
     if not chat or not chat.get("ok"):
-        print("ERROR: бот не может получить доступ к группе")
+        print("ERROR: не удалось получить группу")
         return
 
     pinned = chat["result"].get("pinned_message")
 
     button_text = (
-        "📢 <b>Подать объявление в барахолку</b>\n\n"
+        "📢 ПОДАТЬ ОБЪЯВЛЕНИЕ В БАРАХОЛКУ\n\n"
         "Нажмите кнопку ниже и отправьте объявление через бота.\n"
         "Все объявления проходят модерацию."
     )
 
-    # Если наша кнопка уже закреплена — просто обновляем её.
-    # Это не создаёт дубликаты после каждого перезапуска Railway.
     if pinned:
         pinned_chat_id = str(
             pinned.get("chat", {}).get("id", "")
@@ -782,12 +826,10 @@ def ensure_baraholka_button():
             )
 
             if result and result.get("ok"):
-                print("Кнопка барахолки уже закреплена и обновлена")
+                print("Кнопка барахолки обновлена")
                 return
 
-    # Если закреплённого сообщения нет или его нельзя обновить —
-    # создаём новое в теме Барахолка и закрепляем.
-    result = send_html_message(
+    result = send_message(
         GROUP_ID,
         button_text,
         baraholka_button(),
@@ -803,16 +845,30 @@ def ensure_baraholka_button():
         )
 
         if pin_result and pin_result.get("ok"):
-            print("Кнопка барахолки опубликована и закреплена")
+            print("Кнопка барахолки создана и закреплена")
         else:
-            print("Кнопка опубликована, но закрепить её не удалось")
+            print("WARNING: кнопка создана, но не закреплена")
     else:
-        print("ERROR: не удалось создать кнопку в теме Барахолка")
+        print("ERROR: не удалось создать кнопку барахолки")
 
 
-# ============================================================
-# PRIVATE MESSAGE
-# ============================================================
+def start_new_post(user_id):
+    create_post(user_id)
+
+    user_states[user_id] = {
+        "step": "text"
+    }
+
+    send_message(
+        user_id,
+        "📝 ШАГ 1 ИЗ 4 — ТЕКСТ ОБЪЯВЛЕНИЯ\n\n"
+        "Напишите, что вы продаёте, покупаете или отдаёте.\n\n"
+        "💡 Пример:\n"
+        "Продаю детский велосипед, хорошее состояние, "
+        "цена 500 000 VND.",
+        text_step_keyboard(),
+    )
+
 
 def handle_private_message(message):
     user = message.get("from", {})
@@ -823,68 +879,35 @@ def handle_private_message(message):
     if not user_id:
         return
 
-    # --------------------------------------------------------
-    # START
-    # --------------------------------------------------------
-
     if text.startswith("/start"):
         parts = text.split(maxsplit=1)
 
-        if len(parts) > 1 and parts[1] == "newpost":
-            create_post(user_id)
-
-            user_states[user_id] = {
-                "step": "text"
-            }
-
-            send_message(
-                user_id,
-                "📢 Подача объявления\n\n"
-                "Напишите текст объявления.\n\n"
-                "После этого бот попросит добавить фото, цену и контакт.",
-                main_menu(),
-            )
-
+        if len(parts) > 1 and parts[1].strip() == "newpost":
+            start_new_post(user_id)
             return
 
         send_message(
             user_id,
             "🏠 Nha Trang Fair Барахолка\n\n"
-            "Здесь можно подать объявление о продаже, покупке "
-            "или отдаче вещей.",
+            "📢 Здесь можно подать объявление о продаже, "
+            "покупке или отдаче вещей.\n\n"
+            "Все объявления проходят модерацию.",
             main_menu(),
         )
-
         return
-
-    # --------------------------------------------------------
-    # ПОДАТЬ ОБЪЯВЛЕНИЕ
-    # --------------------------------------------------------
 
     if text == "📢 Подать объявление":
-        create_post(user_id)
-
-        user_states[user_id] = {
-            "step": "text"
-        }
-
-        send_message(
-            user_id,
-            "📝 Напишите текст объявления:",
-            main_menu(),
-        )
-
+        start_new_post(user_id)
         return
-
-    # --------------------------------------------------------
-    # ПРАВИЛА
-    # --------------------------------------------------------
 
     if text == "📋 Правила":
         send_message(
             user_id,
-            "📋 Правила барахолки\n\n"
-            "Разрешены объявления о продаже, покупке и отдаче вещей.\n\n"
+            "📋 ПРАВИЛА БАРАХОЛКИ\n\n"
+            "Разрешены:\n"
+            "• продажа вещей\n"
+            "• покупка вещей\n"
+            "• отдача вещей\n\n"
             "🚫 Запрещены:\n"
             "• аренда квартир и домов\n"
             "• аренда мотобайков\n"
@@ -893,25 +916,36 @@ def handle_private_message(message):
             "• криптореклама\n"
             "• реклама групп и каналов\n"
             "• ссылки\n"
-            "• флуд и спам\n\n"
+            "• спам и флуд\n\n"
             "Все объявления проходят модерацию.",
+            main_menu(),
         )
-
         return
-
-    # --------------------------------------------------------
-    # ПОМОЩЬ
-    # --------------------------------------------------------
 
     if text == "❓ Помощь":
         send_message(
             user_id,
-            "❓ Помощь\n\n"
-            "Чтобы разместить объявление, нажмите:\n"
-            "📢 Подать объявление\n\n"
-            "После отправки оно попадёт на модерацию.",
+            "❓ ПОМОЩЬ\n\n"
+            "Нажмите «📢 Подать объявление».\n"
+            "Затем бот попросит:\n"
+            "1️⃣ текст\n"
+            "2️⃣ фото\n"
+            "3️⃣ цену\n"
+            "4️⃣ контакт\n\n"
+            "После этого вы увидите предпросмотр, "
+            "а объявление отправится модератору.",
+            main_menu(),
         )
+        return
 
+    if text == "❌ Отменить":
+        reset_user(user_id)
+
+        send_message(
+            user_id,
+            "❌ Подача объявления отменена.",
+            main_menu(),
+        )
         return
 
     state = user_states.get(user_id)
@@ -924,26 +958,22 @@ def handle_private_message(message):
         )
         return
 
-    # --------------------------------------------------------
-    # ТЕКСТ
-    # --------------------------------------------------------
+    step = state.get("step")
 
-    if state["step"] == "text":
-
+    if step == "text":
         reason = forbidden_reason(text)
 
         if reason and not is_admin(user_id):
+            reset_user(user_id)
+
             send_message(
                 user_id,
-                "🚫 Объявление не принято.\n\n"
+                "🚫 ОБЪЯВЛЕНИЕ НЕ ПРИНЯТО.\n\n"
                 f"Причина: {reason}\n\n"
                 "Барахолка предназначена только для объявлений "
                 "о продаже, покупке или отдаче вещей.",
+                main_menu(),
             )
-
-            user_states.pop(user_id, None)
-            user_posts.pop(user_id, None)
-
             return
 
         user_posts[user_id]["text"] = text
@@ -952,121 +982,91 @@ def handle_private_message(message):
 
         send_message(
             user_id,
-            "📷 Отправьте фото объявления.\n\n"
-            "Если фото нет — напишите «нет».",
-            main_menu(),
+            "📷 ШАГ 2 ИЗ 4 — ФОТО\n\n"
+            "Отправьте одно или несколько фото объявления.\n\n"
+            "Если фото нет — нажмите «➡️ Без фото».\n\n"
+            "После отправки фото нажмите «➡️ Готово».",
+            photo_step_keyboard(),
         )
-
         return
 
-    # --------------------------------------------------------
-    # ФОТО
-    # --------------------------------------------------------
-
-    if state["step"] == "photos":
-
-        if text.lower() in (
+    if step == "photos":
+        if text == "➡️ Без фото" or text.lower() in (
             "нет",
             "нет фото",
             "без фото",
-            "пропустить",
         ):
+            user_posts[user_id]["photos"] = []
             state["step"] = "price"
 
             send_message(
                 user_id,
-                "💰 Укажите цену.\n\n"
-                "Если цены нет — напишите «нет».",
+                "💰 ШАГ 3 ИЗ 4 — ЦЕНА\n\n"
+                "Укажите цену.\n\n"
+                "💡 Пример: 500 000 VND\n\n"
+                "Если цена договорная — нажмите "
+                "«➡️ Цена договорная».\n"
+                "Если цены нет — нажмите «➡️ Без цены».",
+                price_step_keyboard(),
             )
-
-            return
-
-        if text.lower() in (
-            "готово",
-            "готов",
-            "готова",
-        ):
-            state["step"] = "price"
-
-            send_message(
-                user_id,
-                "💰 Укажите цену.\n\n"
-                "Если цены нет — напишите «нет».",
-            )
-
             return
 
         send_message(
             user_id,
-            "📷 Пожалуйста, отправьте фото или напишите «нет».",
+            "📷 Сначала отправьте фото или нажмите "
+            "«➡️ Без фото».",
+            photo_step_keyboard(),
         )
-
         return
 
-    # --------------------------------------------------------
-    # ЕЩЁ ФОТО
-    # --------------------------------------------------------
-
-    if state["step"] == "photos_more":
-
-        if text.lower() in (
-            "готово",
-            "готов",
-            "готова",
-            "далее",
-            "дальше",
-        ):
+    if step == "photos_more":
+        if text == "➡️ Готово":
             state["step"] = "price"
 
             send_message(
                 user_id,
-                "💰 Укажите цену.\n\n"
-                "Если цены нет — напишите «нет».",
+                "💰 ШАГ 3 ИЗ 4 — ЦЕНА\n\n"
+                "Укажите цену.\n\n"
+                "💡 Пример: 500 000 VND\n\n"
+                "Если цена договорная — нажмите "
+                "«➡️ Цена договорная».\n"
+                "Если цены нет — нажмите «➡️ Без цены».",
+                price_step_keyboard(),
             )
-
-            return
-
-        if text.lower() in (
-            "нет",
-            "нет фото",
-        ):
-            state["step"] = "price"
-
-            send_message(
-                user_id,
-                "💰 Укажите цену.\n\n"
-                "Если цены нет — напишите «нет».",
-            )
-
             return
 
         send_message(
             user_id,
-            "📷 Отправьте ещё фото или напишите «готово».",
+            "📷 Можете отправить ещё фото.\n\n"
+            "Когда закончите — нажмите «➡️ Готово».",
+            photo_more_keyboard(),
         )
-
         return
 
-    # --------------------------------------------------------
-    # ЦЕНА
-    # --------------------------------------------------------
-
-    if state["step"] == "price":
-
-        if text.lower() in (
-            "нет",
-            "без цены",
-            "договорная",
+    if step == "price":
+        if (
+            text == "➡️ Цена договорная"
+            or text.lower() == "договорная"
         ):
             user_posts[user_id]["price"] = "Договорная"
+
+        elif text == "➡️ Без цены" or text.lower() in (
+            "нет",
+            "без цены",
+        ):
+            user_posts[user_id]["price"] = "Не указана"
+
         else:
             reason = forbidden_reason(text)
 
             if reason and not is_admin(user_id):
+                reset_user(user_id)
+
                 send_message(
                     user_id,
-                    "🚫 Это значение не принято.\n\n"
-                    f"Причина: {reason}"
+                    "🚫 Данные не приняты.\n\n"
+                    f"Причина: {reason}",
+                    main_menu(),
                 )
                 return
 
@@ -1076,29 +1076,39 @@ def handle_private_message(message):
 
         send_message(
             user_id,
-            "📞 Укажите контакт для связи.\n\n"
-            "Например: Telegram username или номер телефона.\n\n"
-            "Если хотите не указывать контакт — напишите «нет».",
+            "📞 ШАГ 4 ИЗ 4 — КОНТАКТ\n\n"
+            "Укажите контакт для связи.\n\n"
+            "💡 Пример: @username или номер телефона.\n\n"
+            "Если хотите оставить контакт только через "
+            "модерацию — нажмите «➡️ Без контакта».",
+            contact_step_keyboard(),
         )
-
         return
 
-    # --------------------------------------------------------
-    # КОНТАКТ
-    # --------------------------------------------------------
-
-    if state["step"] == "contact":
-
-        if text.lower() == "нет":
+    if step == "contact":
+        if text == "➡️ Без контакта" or text.lower() in (
+            "нет",
+            "без контакта",
+        ):
             user_posts[user_id]["contact"] = "В личные сообщения"
+
         else:
             reason = forbidden_reason(text)
 
-            if reason and not is_admin(user_id):
+            if reason in (
+                "ссылка",
+                "реклама групп/каналов",
+                "реклама",
+                "казино/ставки",
+                "криптореклама",
+            ) and not is_admin(user_id):
+                reset_user(user_id)
+
                 send_message(
                     user_id,
-                    "🚫 Этот контакт не принят.\n\n"
-                    f"Причина: {reason}"
+                    "🚫 Контакт не принят.\n\n"
+                    f"Причина: {reason}",
+                    main_menu(),
                 )
                 return
 
@@ -1106,36 +1116,25 @@ def handle_private_message(message):
 
         state["step"] = "preview"
 
-        post = user_posts[user_id]
-
-        send_html_message(
-            user_id,
-            build_preview(post) +
-            "\n\nОтправить объявление на модерацию?",
-            {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": "✅ Отправить",
-                            "callback_data": f"submit:{user_id}",
-                        }
-                    ],
-                    [
-                        {
-                            "text": "❌ Отменить",
-                            "callback_data": f"cancel:{user_id}",
-                        }
-                    ],
-                ]
-            },
+        preview = build_preview(
+            user_posts[user_id]
         )
 
+        send_message(
+            user_id,
+            preview + "\n\n"
+            "Проверить всё и отправить на модерацию?",
+            preview_keyboard(user_id),
+        )
         return
 
+    if step == "preview":
+        send_message(
+            user_id,
+            "Нажмите кнопку под предпросмотром.",
+        )
+        return
 
-# ============================================================
-# PRIVATE PHOTO
-# ============================================================
 
 def handle_private_photo(message):
     user = message.get("from", {})
@@ -1149,10 +1148,9 @@ def handle_private_photo(message):
     if not state:
         return
 
-    if state["step"] not in (
-        "photos",
-        "photos_more",
-    ):
+    step = state.get("step")
+
+    if step not in ("photos", "photos_more"):
         return
 
     photos = message.get("photo", [])
@@ -1162,15 +1160,32 @@ def handle_private_photo(message):
 
     photo = photos[-1]
 
-    user_posts.setdefault(user_id, {
-        "text": "",
-        "photos": [],
-        "price": "",
-        "contact": "",
-        "created": time.time(),
-    })
+    user_posts.setdefault(
+        user_id,
+        {
+            "text": "",
+            "photos": [],
+            "price": "",
+            "contact": "",
+            "created": time.time(),
+        }
+    )
 
-    user_posts[user_id].setdefault("photos", [])
+    user_posts[user_id].setdefault(
+        "photos",
+        []
+    )
+
+    if len(user_posts[user_id]["photos"]) >= 10:
+        send_message(
+            user_id,
+            "⚠️ Можно добавить максимум 10 фото.\n\n"
+            "Нажмите «➡️ Готово».",
+            photo_more_keyboard(),
+        )
+        state["step"] = "photos_more"
+        return
+
     user_posts[user_id]["photos"].append(
         photo["file_id"]
     )
@@ -1184,13 +1199,11 @@ def handle_private_photo(message):
     send_message(
         user_id,
         f"✅ Фото добавлено. Всего фото: {count}\n\n"
-        "Можете отправить ещё фото или написать «готово».",
+        "Можете отправить ещё фото или нажать "
+        "«➡️ Готово».",
+        photo_more_keyboard(),
     )
 
-
-# ============================================================
-# CALLBACK
-# ============================================================
 
 def handle_callback(callback):
     callback_id = callback.get("id")
@@ -1200,23 +1213,22 @@ def handle_callback(callback):
 
     answer_callback(callback_id)
 
-    # --------------------------------------------------------
-    # ОТПРАВИТЬ НА МОДЕРАЦИЮ
-    # --------------------------------------------------------
-
     if data.startswith("submit:"):
-
-        target_id = int(data.split(":", 1)[1])
-
-        if target_id != user_id:
+        try:
+            post_id = int(data.split(":", 1)[1])
+        except Exception:
             return
 
-        post = user_posts.get(user_id)
+        if post_id != user_id:
+            return
+
+        post = user_posts.get(post_id)
 
         if not post:
             send_message(
                 user_id,
                 "❌ Объявление не найдено.",
+                main_menu(),
             )
             return
 
@@ -1225,15 +1237,23 @@ def handle_callback(callback):
         )
 
         if reason and not is_admin(user_id):
+            reset_user(user_id)
+
             send_message(
                 user_id,
-                "🚫 Объявление отклонено.\n\n"
+                "🚫 Объявление не принято.\n\n"
                 f"Причина: {reason}",
+                main_menu(),
             )
+            return
 
-            user_states.pop(user_id, None)
-            user_posts.pop(user_id, None)
-
+        if not ADMIN_IDS:
+            send_message(
+                user_id,
+                "⚠️ Сейчас не настроен модератор. "
+                "Объявление не отправлено.",
+                main_menu(),
+            )
             return
 
         if send_moderation(user_id):
@@ -1243,52 +1263,44 @@ def handle_callback(callback):
                 user_id,
                 "✅ Объявление отправлено на модерацию.\n\n"
                 "После проверки модератором оно будет опубликовано.",
+                main_menu(),
             )
         else:
             send_message(
                 user_id,
-                "❌ Не удалось отправить объявление модератору.\n\n"
-                "Попробуйте ещё раз позже.",
+                "⚠️ Не удалось отправить объявление модератору. "
+                "Попробуйте ещё раз.",
+                main_menu(),
             )
 
         return
 
-    # --------------------------------------------------------
-    # ОТМЕНА
-    # --------------------------------------------------------
-
     if data.startswith("cancel:"):
-
-        target_id = int(data.split(":", 1)[1])
-
-        if target_id != user_id:
+        try:
+            post_id = int(data.split(":", 1)[1])
+        except Exception:
             return
 
-        user_states.pop(user_id, None)
-        user_posts.pop(user_id, None)
+        if post_id != user_id:
+            return
+
+        reset_user(user_id)
 
         send_message(
             user_id,
             "❌ Подача объявления отменена.",
             main_menu(),
         )
-
         return
-
-    # --------------------------------------------------------
-    # ДАЛЬШЕ НУЖЕН АДМИН
-    # --------------------------------------------------------
 
     if not is_admin(user_id):
         return
 
-    # --------------------------------------------------------
-    # APPROVE
-    # --------------------------------------------------------
-
     if data.startswith("approve:"):
-
-        post_id = int(data.split(":", 1)[1])
+        try:
+            post_id = int(data.split(":", 1)[1])
+        except Exception:
+            return
 
         post = user_posts.get(post_id)
 
@@ -1299,37 +1311,57 @@ def handle_callback(callback):
             )
             return
 
-        result = publish_post(post_id)
+        reason = forbidden_reason(
+            post.get("text", "")
+        )
 
-        if result and result.get("ok"):
+        if reason:
+            send_message(
+                user_id,
+                "🚫 Публикация остановлена фильтром.\n\n"
+                f"Причина: {reason}",
+            )
 
             send_message(
                 post_id,
-                "✅ Ваше объявление опубликовано в барахолке.",
+                "❌ Ваше объявление не может быть опубликовано.\n\n"
+                f"Причина: {reason}",
+                main_menu(),
             )
+
+            reset_user(post_id)
+            return
+
+        result = publish_post(post_id)
+
+        if result and result.get("ok"):
+            send_message(
+                post_id,
+                "✅ Ваше объявление опубликовано в теме «Барахолка».",
+                main_menu(),
+            )
+
+            reset_user(post_id)
 
             send_message(
                 user_id,
-                f"✅ Объявление {post_id} опубликовано.",
+                f"✅ Объявление пользователя {post_id} опубликовано.",
             )
-
-            user_posts.pop(post_id, None)
 
         else:
             send_message(
                 user_id,
-                "❌ Не удалось опубликовать объявление.",
+                "❌ Не удалось опубликовать объявление. "
+                "Проверьте права бота и тему «Барахолка».",
             )
 
         return
 
-    # --------------------------------------------------------
-    # REJECT
-    # --------------------------------------------------------
-
     if data.startswith("reject:"):
-
-        post_id = int(data.split(":", 1)[1])
+        try:
+            post_id = int(data.split(":", 1)[1])
+        except Exception:
+            return
 
         post = user_posts.get(post_id)
 
@@ -1343,24 +1375,23 @@ def handle_callback(callback):
         send_message(
             post_id,
             "❌ Ваше объявление отклонено модератором.",
+            main_menu(),
         )
 
-        user_posts.pop(post_id, None)
+        reset_user(post_id)
 
         send_message(
             user_id,
-            f"❌ Объявление {post_id} отклонено.",
+            f"❌ Объявление пользователя {post_id} отклонено.",
         )
 
         return
 
-    # --------------------------------------------------------
-    # BAN
-    # --------------------------------------------------------
-
     if data.startswith("ban:"):
-
-        post_id = int(data.split(":", 1)[1])
+        try:
+            post_id = int(data.split(":", 1)[1])
+        except Exception:
+            return
 
         post = user_posts.get(post_id)
 
@@ -1372,29 +1403,31 @@ def handle_callback(callback):
             return
 
         result = ban_user(
-            chat_id=GROUP_ID,
-            user_id=post_id,
+            GROUP_ID,
+            post_id,
         )
 
         if result and result.get("ok"):
             send_message(
                 user_id,
-                f"🚫 Пользователь {post_id} заблокирован в группе.",
+                f"🚫 Пользователь {post_id} заблокирован.",
             )
+
+            send_message(
+                post_id,
+                "🚫 Вы заблокированы в группе за нарушение правил.",
+                main_menu(),
+            )
+
+            reset_user(post_id)
         else:
             send_message(
                 user_id,
                 "❌ Не удалось заблокировать пользователя.",
             )
 
-        user_posts.pop(post_id, None)
-
         return
 
-
-# ============================================================
-# GROUP MESSAGE
-# ============================================================
 
 def handle_group_message(message):
     chat = message.get("chat", {})
@@ -1409,7 +1442,6 @@ def handle_group_message(message):
     if not user_id:
         return
 
-    # Администраторов не фильтруем
     if is_admin(user_id):
         return
 
@@ -1421,43 +1453,35 @@ def handle_group_message(message):
     if not text:
         return
 
-    # Проверка запрещённого контента
     reason = forbidden_reason(text)
 
     if reason:
         message_id = message.get("message_id")
 
-        delete_message(
-            GROUP_ID,
-            message_id,
-        )
+        if message_id:
+            delete_message(
+                GROUP_ID,
+                message_id,
+            )
 
         print(
             f"Удалено сообщение {message_id}: {reason}"
         )
-
         return
 
-    # FLOOD
     if not flood_check(user_id):
         message_id = message.get("message_id")
 
-        delete_message(
-            GROUP_ID,
-            message_id,
-        )
+        if message_id:
+            delete_message(
+                GROUP_ID,
+                message_id,
+            )
 
-        print(
-            f"Удалён flood от пользователя {user_id}"
-        )
+        return
 
-
-# ============================================================
-# UPDATE
-# ============================================================
 
 def process_update(update):
-
     if "callback_query" in update:
         handle_callback(
             update["callback_query"]
@@ -1473,65 +1497,46 @@ def process_update(update):
     chat_type = chat.get("type")
 
     if chat_type == "private":
-
         if "photo" in message:
             handle_private_photo(message)
-
         elif "text" in message:
             handle_private_message(message)
-
         return
 
-    if chat_type in (
-        "group",
-        "supergroup",
-    ):
+    if chat_type in ("group", "supergroup"):
         handle_group_message(message)
 
 
-# ============================================================
-# MAIN
-# ============================================================
-
 def main():
-
-    print("====================================")
+    print("======================================")
     print("Nha Trang Fair Барахолка Bot")
-    print("====================================")
-
-    if not TOKEN:
-        print("ERROR: TELEGRAM_BOT_TOKEN отсутствует")
-        return
+    print("======================================")
 
     me = get_me()
 
-    if me and me.get("ok"):
-        bot = me["result"]
-
-        print(
-            "Bot:",
-            bot.get("first_name"),
-            "@",
-            bot.get("username"),
-        )
-
-    else:
-        print("ERROR: не удалось подключиться к Telegram API")
+    if not me or not me.get("ok"):
+        print("ERROR: Telegram API недоступен")
         return
+
+    bot = me["result"]
+
+    print(
+        "Bot:",
+        bot.get("first_name"),
+        "@",
+        bot.get("username")
+    )
 
     print("GROUP_ID:", GROUP_ID)
     print("GROUP_THREAD_ID:", GROUP_THREAD_ID)
     print("ADMIN_IDS:", ADMIN_IDS)
 
-    # Создаём кнопку в теме Барахолка
     ensure_baraholka_button()
 
     offset = 0
 
     while True:
-
         try:
-
             result = api(
                 "getUpdates",
                 {
@@ -1543,41 +1548,32 @@ def main():
                             "callback_query",
                         ]
                     ),
-                },
+                }
             )
 
             if not result or not result.get("ok"):
                 time.sleep(3)
                 continue
 
-            updates = result.get("result", [])
-
-            for update in updates:
-
+            for update in result.get("result", []):
                 offset = update["update_id"] + 1
 
                 try:
                     process_update(update)
-
                 except Exception as e:
                     print(
                         "UPDATE ERROR:",
-                        repr(e),
+                        repr(e)
                     )
 
         except Exception as e:
-
             print(
                 "MAIN LOOP ERROR:",
-                repr(e),
+                repr(e)
             )
 
             time.sleep(5)
 
-
-# ============================================================
-# START
-# ============================================================
 
 if __name__ == "__main__":
     main()
