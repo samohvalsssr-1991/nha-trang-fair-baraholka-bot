@@ -310,17 +310,27 @@ def handle_private_message(message):
     user_id = message["from"]["id"]
     text = message.get("text", "").strip()
 
-    if text == "/start":
+    if text == "/start" or text.startswith("/start "):
+        deep_link = text.split(maxsplit=1)[1].strip() if " " in text else ""
         users[user_id] = {"step": None}
-        send_message(
-            chat_id,
-            "👋 <b>Добро пожаловать!</b>\n\n"
-            "Это бот барахолки Нячанга.\n\n"
-            "Здесь можно подать объявление о продаже, покупке "
-            "или отдаче вещей.\n\n"
-            "Все объявления проходят модерацию.",
-            main_menu()
-        )
+
+        if deep_link == "newpost":
+            create_post(user_id)
+            send_message(
+                chat_id,
+                "📝 <b>Шаг 1 из 4</b>\n\n"
+                "Напишите текст объявления."
+            )
+        else:
+            send_message(
+                chat_id,
+                "👋 <b>Добро пожаловать!</b>\n\n"
+                "Это бот барахолки Нячанга.\n\n"
+                "Здесь можно подать объявление о продаже, покупке "
+                "или отдаче вещей.\n\n"
+                "Все объявления проходят модерацию.",
+                main_menu()
+            )
         return
 
     if text == "/id":
@@ -688,6 +698,48 @@ def process_update(update):
                 message["chat"]["id"],
                 f"🆔 Chat ID:\n<code>{message['chat']['id']}</code>\n\n"
                 f"🆔 Topic ID:\n<code>{message.get('message_thread_id', 'нет')}</code>"
+            )
+            return
+
+        if text == "/setbutton":
+            if not is_admin(user_id):
+                send_message(message["chat"]["id"], "⛔ Только для администраторов.")
+                return
+
+            thread_id = message.get("message_thread_id")
+            configured_thread = GROUP_THREAD_ID.strip()
+
+            if not thread_id:
+                send_message(
+                    message["chat"]["id"],
+                    "❗ Команду /setbutton нужно отправить именно внутри нужной темы."
+                )
+                return
+
+            if configured_thread and str(thread_id) != configured_thread:
+                send_message(
+                    message["chat"]["id"],
+                    "❗ Эта команда отправлена не в настроенной теме барахолки."
+                )
+                return
+
+            keyboard = {
+                "inline_keyboard": [[
+                    {
+                        "text": "📢 Подать объявление",
+                        "url": "https://t.me/NhaTrangFairBaraholkaBot?start=newpost"
+                    }
+                ]]
+            }
+
+            send_message(
+                message["chat"]["id"],
+                "📢 <b>Хотите разместить объявление?</b>\n\n"
+                "Нажмите кнопку ниже. Объявление сначала проходит "
+                "модерацию, после одобрения автоматически публикуется "
+                "в этом разделе.",
+                keyboard,
+                message_thread_id=thread_id
             )
             return
 
