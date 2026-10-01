@@ -14,6 +14,7 @@ ADMIN_IDS = {
 }
 
 GROUP_ID = os.getenv("GROUP_ID", "").strip()
+GROUP_THREAD_ID = os.getenv("GROUP_THREAD_ID", "").strip()
 
 API = f"https://api.telegram.org/bot{TOKEN}"
 
@@ -31,12 +32,15 @@ def api(method, data=None):
         return json.loads(response.read().decode())
 
 
-def send_message(chat_id, text, keyboard=None):
+def send_message(chat_id, text, keyboard=None, message_thread_id=None):
     data = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML",
     }
+
+    if message_thread_id:
+        data["message_thread_id"] = int(message_thread_id)
 
     if keyboard:
         data["reply_markup"] = json.dumps(keyboard, ensure_ascii=False)
@@ -71,21 +75,10 @@ def is_admin(user_id):
 def main_menu():
     return {
         "inline_keyboard": [
+            [{"text": "📢 Подать объявление", "callback_data": "new_post"}],
             [
-                {
-                    "text": "📢 Подать объявление",
-                    "callback_data": "new_post"
-                }
-            ],
-            [
-                {
-                    "text": "📋 Правила",
-                    "callback_data": "rules"
-                },
-                {
-                    "text": "❓ Помощь",
-                    "callback_data": "help"
-                }
+                {"text": "📋 Правила", "callback_data": "rules"},
+                {"text": "❓ Помощь", "callback_data": "help"}
             ]
         ]
     }
@@ -95,21 +88,10 @@ def moderation_keyboard(post_id):
     return {
         "inline_keyboard": [
             [
-                {
-                    "text": "✅ Опубликовать",
-                    "callback_data": f"approve:{post_id}"
-                },
-                {
-                    "text": "❌ Отклонить",
-                    "callback_data": f"reject:{post_id}"
-                }
+                {"text": "✅ Опубликовать", "callback_data": f"approve:{post_id}"},
+                {"text": "❌ Отклонить", "callback_data": f"reject:{post_id}"}
             ],
-            [
-                {
-                    "text": "🚫 Заблокировать",
-                    "callback_data": f"block:{post_id}"
-                }
-            ]
+            [{"text": "🚫 Заблокировать", "callback_data": f"block:{post_id}"}]
         ]
     }
 
@@ -117,18 +99,8 @@ def moderation_keyboard(post_id):
 def submission_keyboard():
     return {
         "inline_keyboard": [
-            [
-                {
-                    "text": "✅ Готово с фото",
-                    "callback_data": "photos_done"
-                }
-            ],
-            [
-                {
-                    "text": "➡️ Без фото",
-                    "callback_data": "no_photos"
-                }
-            ]
+            [{"text": "✅ Готово с фото", "callback_data": "photos_done"}],
+            [{"text": "➡️ Без фото", "callback_data": "no_photos"}]
         ]
     }
 
@@ -194,11 +166,9 @@ def forbidden_reason(text):
 
 def flood_check(user_id):
     now = time.time()
-
     times = flood.setdefault(user_id, [])
     times[:] = [x for x in times if now - x < 15]
     times.append(now)
-
     return len(times) >= 7
 
 
@@ -215,6 +185,7 @@ def create_post(user_id):
 
 def publish_post(post):
     if not GROUP_ID:
+        print("ERROR: GROUP_ID is missing")
         return False
 
     chat_id = GROUP_ID
@@ -229,6 +200,8 @@ def publish_post(post):
     photos = post.get("photos", [])
 
     try:
+        thread_id = GROUP_THREAD_ID.strip()
+
         if photos:
             media = []
 
@@ -244,17 +217,40 @@ def publish_post(post):
 
                 media.append(item)
 
-            api("sendMediaGroup", {
+            data = {
                 "chat_id": chat_id,
-                "media": json.dumps(media)
-            })
+                "media": json.dumps(media, ensure_ascii=False)
+            }
+
+            if thread_id:
+                data["message_thread_id"] = int(thread_id)
+
+            result = api("sendMediaGroup", data)
 
         else:
-            send_message(chat_id, caption)
+            data = {
+                "chat_id": chat_id,
+                "text": caption,
+                "parse_mode": "HTML"
+            }
 
+            if thread_id:
+                data["message_thread_id"] = int(thread_id)
+
+            result = api("sendMessage", data)
+
+        if not result.get("ok"):
+            print("Publish error:", result)
+            return False
+
+        print(
+            f"Published to {chat_id}"
+            + (f", topic {thread_id}" if thread_id else ", General")
+        )
         return True
 
-    except Exception:
+    except Exception as e:
+        print("Publish exception:", e)
         return False
 
 
@@ -289,7 +285,7 @@ def send_moderation(post_id, post):
 
                 api("sendMediaGroup", {
                     "chat_id": admin_id,
-                    "media": json.dumps(media)
+                    "media": json.dumps(media, ensure_ascii=False)
                 })
 
                 send_message(
@@ -305,19 +301,17 @@ def send_moderation(post_id, post):
                     moderation_keyboard(post_id)
                 )
 
-        except Exception:
-            pass
+        except Exception as e:
+            print("Moderation send error:", e)
 
 
 def handle_private_message(message):
     chat_id = message["chat"]["id"]
     user_id = message["from"]["id"]
-
     text = message.get("text", "").strip()
 
     if text == "/start":
         users[user_id] = {"step": None}
-
         send_message(
             chat_id,
             "👋 <b>Добро пожаловать!</b>\n\n"
@@ -356,11 +350,7 @@ def handle_private_message(message):
     state = pending_posts.get(user_id)
 
     if not state:
-        send_message(
-            chat_id,
-            "Выберите действие:",
-            main_menu()
-        )
+        send_message(chat_id, "Выберите действие:", main_menu())
         return
 
     step = state["step"]
@@ -374,7 +364,6 @@ def handle_private_message(message):
 
         if reason:
             pending_posts.pop(user_id, None)
-
             send_message(
                 chat_id,
                 f"❌ Объявление нельзя подать.\n\n"
@@ -432,18 +421,8 @@ def handle_private_message(message):
             preview,
             {
                 "inline_keyboard": [
-                    [
-                        {
-                            "text": "📤 Отправить модератору",
-                            "callback_data": "send_moderation"
-                        }
-                    ],
-                    [
-                        {
-                            "text": "❌ Отменить",
-                            "callback_data": "cancel_post"
-                        }
-                    ]
+                    [{"text": "📤 Отправить модератору", "callback_data": "send_moderation"}],
+                    [{"text": "❌ Отменить", "callback_data": "cancel_post"}]
                 ]
             }
         )
@@ -482,7 +461,6 @@ def handle_callback(query):
 
     if data == "new_post":
         create_post(user_id)
-
         send_message(
             chat_id,
             "📝 <b>Шаг 1 из 4</b>\n\n"
@@ -613,7 +591,7 @@ def handle_callback(query):
                 send_message(
                     chat_id,
                     "❌ Не удалось опубликовать объявление.\n"
-                    "Проверьте GROUP_ID."
+                    "Проверьте GROUP_ID и GROUP_THREAD_ID."
                 )
 
         elif action == "reject":
@@ -701,6 +679,18 @@ def process_update(update):
             handle_private_message(message)
 
     elif chat_type in ("group", "supergroup"):
+        # /id теперь работает и в группе, чтобы при необходимости
+        # можно было узнать числовой Chat ID без сторонних ботов.
+        text = message.get("text", "").strip()
+
+        if text == "/id":
+            send_message(
+                message["chat"]["id"],
+                f"🆔 Chat ID:\n<code>{message['chat']['id']}</code>\n\n"
+                f"🆔 Topic ID:\n<code>{message.get('message_thread_id', 'нет')}</code>"
+            )
+            return
+
         handle_group_message(message)
 
 
@@ -710,6 +700,8 @@ def main():
         return
 
     print("Bot started")
+    print(f"GROUP_ID: {GROUP_ID or 'NOT SET'}")
+    print(f"GROUP_THREAD_ID: {GROUP_THREAD_ID or 'NOT SET'}")
 
     offset = 0
 
