@@ -1,3 +1,4 @@
+
 import os
 import re
 import json
@@ -5,7 +6,15 @@ import time
 import urllib.request
 import urllib.parse
 
+# ============================================================
+# NHA TRANG FAIR БАРАХОЛКА — FINAL BOT
+# ============================================================
+
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+
+# Точные данные группы/темы, которые мы получили из Telegram.
+GROUP_ID = "-1001776236864"
+GROUP_THREAD_ID = "17186"
 
 ADMIN_IDS = {
     int(x.strip())
@@ -13,15 +22,18 @@ ADMIN_IDS = {
     if x.strip().isdigit()
 }
 
-GROUP_ID = os.getenv("GROUP_ID", "").strip()
-GROUP_THREAD_ID = os.getenv("GROUP_THREAD_ID", "").strip()
-
 API = f"https://api.telegram.org/bot{TOKEN}"
 
 users = {}
 pending_posts = {}
 flood = {}
+admin_cache = {}
+BOT_ID = None
 
+
+# ============================================================
+# TELEGRAM API
+# ============================================================
 
 def api(method, data=None):
     data = data or {}
@@ -48,6 +60,20 @@ def send_message(chat_id, text, keyboard=None, message_thread_id=None):
     return api("sendMessage", data)
 
 
+def edit_message(chat_id, message_id, text, keyboard=None):
+    data = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "HTML",
+    }
+
+    if keyboard:
+        data["reply_markup"] = json.dumps(keyboard, ensure_ascii=False)
+
+    return api("editMessageText", data)
+
+
 def delete_message(chat_id, message_id):
     try:
         api("deleteMessage", {
@@ -56,6 +82,29 @@ def delete_message(chat_id, message_id):
         })
     except Exception:
         pass
+
+
+def pin_message(chat_id, message_id):
+    try:
+        return api("pinChatMessage", {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "disable_notification": True
+        })
+    except Exception as e:
+        print("Pin error:", e)
+        return {"ok": False}
+
+
+def ban_user(chat_id, user_id):
+    try:
+        return api("banChatMember", {
+            "chat_id": chat_id,
+            "user_id": user_id
+        })
+    except Exception as e:
+        print("Ban error:", e)
+        return {"ok": False}
 
 
 def answer_callback(callback_id, text=""):
@@ -68,9 +117,56 @@ def answer_callback(callback_id, text=""):
         pass
 
 
-def is_admin(user_id):
+def get_me():
+    global BOT_ID
+    result = api("getMe")
+    if result.get("ok"):
+        BOT_ID = result["result"]["id"]
+        return result["result"]
+    return None
+
+
+# ============================================================
+# RIGHTS / ADMINS
+# ============================================================
+
+def is_configured_admin(user_id):
     return user_id in ADMIN_IDS
 
+
+def is_group_admin(user_id):
+    if user_id in ADMIN_IDS:
+        return True
+
+    now = time.time()
+    cached = admin_cache.get(user_id)
+
+    if cached and now - cached["time"] < 300:
+        return cached["value"]
+
+    try:
+        result = api("getChatMember", {
+            "chat_id": GROUP_ID,
+            "user_id": user_id
+        })
+
+        status = result.get("result", {}).get("status")
+        value = status in ("administrator", "creator")
+
+        admin_cache[user_id] = {
+            "value": value,
+            "time": now
+        }
+
+        return value
+
+    except Exception:
+        return False
+
+
+# ============================================================
+# BUTTONS
+# ============================================================
 
 def main_menu():
     return {
@@ -88,10 +184,21 @@ def moderation_keyboard(post_id):
     return {
         "inline_keyboard": [
             [
-                {"text": "✅ Опубликовать", "callback_data": f"approve:{post_id}"},
-                {"text": "❌ Отклонить", "callback_data": f"reject:{post_id}"}
+                {
+                    "text": "✅ Опубликовать",
+                    "callback_data": f"approve:{post_id}"
+                },
+                {
+                    "text": "❌ Отклонить",
+                    "callback_data": f"reject:{post_id}"
+                }
             ],
-            [{"text": "🚫 Заблокировать", "callback_data": f"block:{post_id}"}]
+            [
+                {
+                    "text": "🚫 Заблокировать",
+                    "callback_data": f"block:{post_id}"
+                }
+            ]
         ]
     }
 
@@ -105,6 +212,21 @@ def submission_keyboard():
     }
 
 
+def baraholka_button():
+    return {
+        "inline_keyboard": [[
+            {
+                "text": "📢 Подать объявление",
+                "url": "https://t.me/NhaTrangFairBaraholkaBot?start=newpost"
+            }
+        ]]
+    }
+
+
+# ============================================================
+# FILTER
+# ============================================================
+
 def normalize(text):
     return re.sub(r"\s+", " ", text.lower()).strip()
 
@@ -114,45 +236,49 @@ def forbidden_reason(text):
 
     patterns = [
         (
-            r"(аренд|сдам|сниму).{0,40}(квартир|дом|комнат|апартамент)"
+            r"(аренд|сдам|сниму).{0,60}(квартир|дом|комнат|апартамент)"
             r"|"
-            r"(квартир|дом|комнат|апартамент).{0,40}(аренд|сдам|сниму)",
+            r"(квартир|дом|комнат|апартамент).{0,60}(аренд|сдам|сниму)"
+            r"|"
+            r"cho thuê căn hộ|cho thuê nhà|cho thue can ho|cho thue nha",
             "аренда квартир/домов"
         ),
         (
-            r"(аренд|сдам).{0,40}(мотобайк|мото|скутер|байк)"
+            r"(аренд|сдам).{0,60}(мотобайк|мото|скутер|байк)"
             r"|"
-            r"(motobike|motorbike|bike).{0,30}(rent|rental)"
+            r"(motobike|motorbike|bike|scooter).{0,40}(rent|rental)"
             r"|"
-            r"cho thuê xe máy",
+            r"cho thuê xe máy|cho thue xe may",
             "аренда мотобайков"
         ),
         (
-            r"обмен.{0,30}(валют|денег|доллар|донг)"
+            r"обмен.{0,50}(валют|денег|доллар|донг)"
             r"|"
-            r"(currency exchange|money exchange)"
+            r"(валют|доллар|донг).{0,50}обмен"
             r"|"
-            r"đổi tiền|đổi ngoại tệ",
+            r"(currency exchange|money exchange|exchange)"
+            r"|"
+            r"đổi tiền|đổi ngoại tệ|doi tien",
             "обмен валют"
         ),
         (
-            r"казино|casino|ставки|betting|1xbet|pin up|pinup",
+            r"казино|casino|ставки|betting|1xbet|pin up|pinup|bet",
             "казино/ставки"
         ),
         (
-            r"заработок.{0,30}(крипт|usdt|bitcoin)"
+            r"(крипт|crypto|usdt|bitcoin|btc|eth).{0,50}"
+            r"(заработ|инвест|доход|прибыл|profit|income|invest)"
             r"|"
-            r"крипт.{0,30}(заработ|инвест)"
-            r"|"
-            r"crypto.{0,30}(profit|income|invest)",
+            r"(заработ|инвест|доход|прибыл|profit|income|invest).{0,50}"
+            r"(крипт|crypto|usdt|bitcoin|btc|eth)",
             "криптореклама"
         ),
         (
-            r"подписывайтесь|подпишись|реклама|рекламн",
+            r"подписывайтесь|подпишись|реклама|рекламн|promo|advertising",
             "реклама"
         ),
         (
-            r"https?://|www\.|t\.me/",
+            r"https?://|www\.|t\.me/|telegram\.me/|wa\.me/",
             "ссылка"
         ),
     ]
@@ -172,6 +298,10 @@ def flood_check(user_id):
     return len(times) >= 7
 
 
+# ============================================================
+# POST FLOW
+# ============================================================
+
 def create_post(user_id):
     pending_posts[user_id] = {
         "text": "",
@@ -179,17 +309,12 @@ def create_post(user_id):
         "price": "",
         "contact": "",
         "step": "text",
-        "created": time.time()
+        "created": time.time(),
+        "user_id": user_id
     }
 
 
 def publish_post(post):
-    if not GROUP_ID:
-        print("ERROR: GROUP_ID is missing")
-        return False
-
-    chat_id = GROUP_ID
-
     caption = (
         "📢 <b>ОБЪЯВЛЕНИЕ</b>\n\n"
         f"{post['text']}\n\n"
@@ -197,11 +322,10 @@ def publish_post(post):
         f"📞 <b>Контакт:</b> {post['contact']}"
     )
 
+    thread_id = int(GROUP_THREAD_ID)
     photos = post.get("photos", [])
 
     try:
-        thread_id = GROUP_THREAD_ID.strip()
-
         if photos:
             media = []
 
@@ -217,37 +341,28 @@ def publish_post(post):
 
                 media.append(item)
 
-            data = {
-                "chat_id": chat_id,
+            result = api("sendMediaGroup", {
+                "chat_id": GROUP_ID,
+                "message_thread_id": thread_id,
                 "media": json.dumps(media, ensure_ascii=False)
-            }
-
-            if thread_id:
-                data["message_thread_id"] = int(thread_id)
-
-            result = api("sendMediaGroup", data)
+            })
 
         else:
-            data = {
-                "chat_id": chat_id,
+            result = api("sendMessage", {
+                "chat_id": GROUP_ID,
+                "message_thread_id": thread_id,
                 "text": caption,
                 "parse_mode": "HTML"
-            }
+            })
 
-            if thread_id:
-                data["message_thread_id"] = int(thread_id)
+        if result.get("ok"):
+            print(
+                f"Published: group={GROUP_ID}, topic={GROUP_THREAD_ID}"
+            )
+            return True
 
-            result = api("sendMessage", data)
-
-        if not result.get("ok"):
-            print("Publish error:", result)
-            return False
-
-        print(
-            f"Published to {chat_id}"
-            + (f", topic {thread_id}" if thread_id else ", General")
-        )
-        return True
+        print("Publish error:", result)
+        return False
 
     except Exception as e:
         print("Publish exception:", e)
@@ -256,6 +371,7 @@ def publish_post(post):
 
 def send_moderation(post_id, post):
     if not ADMIN_IDS:
+        print("ERROR: ADMIN_IDS is empty")
         return
 
     caption = (
@@ -302,35 +418,110 @@ def send_moderation(post_id, post):
                 )
 
         except Exception as e:
-            print("Moderation send error:", e)
+            print("Moderation error:", e)
 
+
+# ============================================================
+# AUTO BUTTON — ONE PINNED MESSAGE
+# ============================================================
+
+def ensure_baraholka_button():
+    """
+    Creates one permanent button message in topic 17186.
+    On restart, if that message is the pinned message, edits it
+    instead of creating another copy.
+    """
+
+    if not GROUP_ID or not GROUP_THREAD_ID:
+        print("Button skipped: group/topic not configured")
+        return
+
+    button_text = (
+        "📢 <b>Хотите разместить объявление?</b>\n\n"
+        "Нажмите кнопку ниже.\n"
+        "Объявление сначала проходит модерацию, "
+        "после одобрения автоматически публикуется "
+        "в разделе «Барахолка»."
+    )
+
+    try:
+        chat = api("getChat", {"chat_id": GROUP_ID})
+
+        if not chat.get("ok"):
+            print("getChat error:", chat)
+            return
+
+        pinned = chat["result"].get("pinned_message")
+
+        if (
+            pinned
+            and pinned.get("from", {}).get("id") == BOT_ID
+            and "Хотите разместить объявление?" in
+                pinned.get("text", "")
+        ):
+            edit_message(
+                GROUP_ID,
+                pinned["message_id"],
+                button_text,
+                baraholka_button()
+            )
+            print("Baraholka button: existing pinned message updated")
+            return
+
+        result = send_message(
+            GROUP_ID,
+            button_text,
+            baraholka_button(),
+            message_thread_id=GROUP_THREAD_ID
+        )
+
+        if result.get("ok"):
+            message_id = result["result"]["message_id"]
+            pin_result = pin_message(GROUP_ID, message_id)
+
+            if pin_result.get("ok"):
+                print("Baraholka button: created and pinned")
+            else:
+                print("Baraholka button: created, but pin failed")
+        else:
+            print("Baraholka button send error:", result)
+
+    except Exception as e:
+        print("Button setup error:", e)
+
+
+# ============================================================
+# PRIVATE CHAT
+# ============================================================
 
 def handle_private_message(message):
     chat_id = message["chat"]["id"]
     user_id = message["from"]["id"]
     text = message.get("text", "").strip()
 
-    if text == "/start" or text.startswith("/start "):
-        deep_link = text.split(maxsplit=1)[1].strip() if " " in text else ""
+    if text.startswith("/start"):
         users[user_id] = {"step": None}
 
-        if deep_link == "newpost":
+        if text.strip() == "/start newpost":
             create_post(user_id)
             send_message(
                 chat_id,
                 "📝 <b>Шаг 1 из 4</b>\n\n"
-                "Напишите текст объявления."
+                "Напишите текст объявления.\n\n"
+                "Например:\n"
+                "«Продаю детский велосипед, состояние хорошее...»"
             )
-        else:
-            send_message(
-                chat_id,
-                "👋 <b>Добро пожаловать!</b>\n\n"
-                "Это бот барахолки Нячанга.\n\n"
-                "Здесь можно подать объявление о продаже, покупке "
-                "или отдаче вещей.\n\n"
-                "Все объявления проходят модерацию.",
-                main_menu()
-            )
+            return
+
+        send_message(
+            chat_id,
+            "👋 <b>Добро пожаловать!</b>\n\n"
+            "Это бот барахолки Нячанга.\n\n"
+            "Здесь можно подать объявление о продаже, покупке "
+            "или отдаче вещей.\n\n"
+            "Все объявления проходят модерацию.",
+            main_menu()
+        )
         return
 
     if text == "/id":
@@ -363,9 +554,7 @@ def handle_private_message(message):
         send_message(chat_id, "Выберите действие:", main_menu())
         return
 
-    step = state["step"]
-
-    if step == "text":
+    if state["step"] == "text":
         if not text:
             send_message(chat_id, "❗ Напишите текст объявления.")
             return
@@ -395,7 +584,7 @@ def handle_private_message(message):
         )
         return
 
-    if step == "price":
+    if state["step"] == "price":
         if not text:
             send_message(chat_id, "❗ Напишите цену.")
             return
@@ -410,7 +599,7 @@ def handle_private_message(message):
         )
         return
 
-    if step == "contact":
+    if state["step"] == "contact":
         if not text:
             send_message(chat_id, "❗ Укажите контакт.")
             return
@@ -431,8 +620,18 @@ def handle_private_message(message):
             preview,
             {
                 "inline_keyboard": [
-                    [{"text": "📤 Отправить модератору", "callback_data": "send_moderation"}],
-                    [{"text": "❌ Отменить", "callback_data": "cancel_post"}]
+                    [
+                        {
+                            "text": "📤 Отправить модератору",
+                            "callback_data": "send_moderation"
+                        }
+                    ],
+                    [
+                        {
+                            "text": "❌ Отменить",
+                            "callback_data": "cancel_post"
+                        }
+                    ]
                 ]
             }
         )
@@ -450,16 +649,21 @@ def handle_private_photo(message):
     photos = message.get("photo", [])
 
     if photos:
-        photo_id = photos[-1]["file_id"]
-        state["photos"].append(photo_id)
+        state["photos"].append(photos[-1]["file_id"])
 
         send_message(
             chat_id,
-            f"📸 Фото добавлено. Всего фотографий: <b>{len(state['photos'])}</b>\n\n"
-            "Можете отправить ещё фото или нажмите «Готово с фото».",
+            f"📸 Фото добавлено. Всего фотографий: "
+            f"<b>{len(state['photos'])}</b>\n\n"
+            "Можете отправить ещё фото или нажмите "
+            "«Готово с фото».",
             submission_keyboard()
         )
 
+
+# ============================================================
+# CALLBACKS
+# ============================================================
 
 def handle_callback(query):
     callback_id = query["id"]
@@ -485,7 +689,7 @@ def handle_callback(query):
             chat_id,
             "📋 <b>Правила барахолки</b>\n\n"
             "Разрешены продажа, покупка и отдача вещей.\n\n"
-            "🚫 Запрещены аренда недвижимости, "
+            "🚫 Запрещены аренда квартир/домов, "
             "аренда мотобайков, обмен валют, казино, "
             "криптореклама, спам и ссылки."
         )
@@ -568,8 +772,11 @@ def handle_callback(query):
     if ":" in data:
         action, post_id = data.split(":", 1)
 
-        if not is_admin(user_id):
-            answer_callback(callback_id, "⛔ Только для модераторов.")
+        if not is_configured_admin(user_id):
+            answer_callback(
+                callback_id,
+                "⛔ Только для модераторов."
+            )
             return
 
         post = pending_posts.get(post_id)
@@ -600,8 +807,7 @@ def handle_callback(query):
             else:
                 send_message(
                     chat_id,
-                    "❌ Не удалось опубликовать объявление.\n"
-                    "Проверьте GROUP_ID и GROUP_THREAD_ID."
+                    "❌ Не удалось опубликовать объявление."
                 )
 
         elif action == "reject":
@@ -623,29 +829,44 @@ def handle_callback(query):
         elif action == "block":
             pending_posts.pop(post_id, None)
 
-            send_message(
-                chat_id,
-                f"🚫 Заявка <code>{post_id}</code> отклонена."
-            )
+            ban_result = ban_user(GROUP_ID, post["user_id"])
+
+            if ban_result.get("ok"):
+                result_text = (
+                    f"🚫 Объявление отклонено.\n"
+                    f"Пользователь заблокирован в группе."
+                )
+            else:
+                result_text = (
+                    f"🚫 Объявление отклонено.\n"
+                    f"⚠️ Заблокировать пользователя не удалось."
+                )
+
+            send_message(chat_id, result_text)
 
             try:
                 send_message(
                     post["user_id"],
-                    "🚫 Ваше объявление заблокировано."
+                    "🚫 Ваше объявление отклонено."
                 )
             except Exception:
                 pass
 
 
+# ============================================================
+# GROUP
+# ============================================================
+
 def handle_group_message(message):
-    chat_id = message["chat"]["id"]
+    chat_id = str(message["chat"]["id"])
     user = message.get("from", {})
     user_id = user.get("id")
 
-    if not user_id:
+    if chat_id != GROUP_ID or not user_id:
         return
 
-    if is_admin(user_id):
+    # Все реальные администраторы группы исключены из фильтра.
+    if is_group_admin(user_id):
         return
 
     text = message.get("text", "") or message.get("caption", "")
@@ -657,9 +878,13 @@ def handle_group_message(message):
             delete_message(chat_id, message["message_id"])
 
             try:
+                thread_id = message.get("message_thread_id")
+
                 send_message(
                     chat_id,
-                    f"🚫 Сообщение удалено.\nПричина: <b>{reason}</b>."
+                    f"🚫 Сообщение удалено.\n"
+                    f"Причина: <b>{reason}</b>.",
+                    message_thread_id=thread_id
                 )
             except Exception:
                 pass
@@ -669,6 +894,10 @@ def handle_group_message(message):
     if flood_check(user_id):
         delete_message(chat_id, message["message_id"])
 
+
+# ============================================================
+# UPDATES
+# ============================================================
 
 def process_update(update):
     if "callback_query" in update:
@@ -689,71 +918,46 @@ def process_update(update):
             handle_private_message(message)
 
     elif chat_type in ("group", "supergroup"):
-        # /id теперь работает и в группе, чтобы при необходимости
-        # можно было узнать числовой Chat ID без сторонних ботов.
         text = message.get("text", "").strip()
 
-        if text == "/id":
+        # /id отвечает именно в той теме, откуда команда пришла.
+        if text.startswith("/id"):
             send_message(
                 message["chat"]["id"],
-                f"🆔 Chat ID:\n<code>{message['chat']['id']}</code>\n\n"
-                f"🆔 Topic ID:\n<code>{message.get('message_thread_id', 'нет')}</code>"
-            )
-            return
-
-        if text == "/setbutton":
-            if not is_admin(user_id):
-                send_message(message["chat"]["id"], "⛔ Только для администраторов.")
-                return
-
-            thread_id = message.get("message_thread_id")
-            configured_thread = GROUP_THREAD_ID.strip()
-
-            if not thread_id:
-                send_message(
-                    message["chat"]["id"],
-                    "❗ Команду /setbutton нужно отправить именно внутри нужной темы."
-                )
-                return
-
-            if configured_thread and str(thread_id) != configured_thread:
-                send_message(
-                    message["chat"]["id"],
-                    "❗ Эта команда отправлена не в настроенной теме барахолки."
-                )
-                return
-
-            keyboard = {
-                "inline_keyboard": [[
-                    {
-                        "text": "📢 Подать объявление",
-                        "url": "https://t.me/NhaTrangFairBaraholkaBot?start=newpost"
-                    }
-                ]]
-            }
-
-            send_message(
-                message["chat"]["id"],
-                "📢 <b>Хотите разместить объявление?</b>\n\n"
-                "Нажмите кнопку ниже. Объявление сначала проходит "
-                "модерацию, после одобрения автоматически публикуется "
-                "в этом разделе.",
-                keyboard,
-                message_thread_id=thread_id
+                f"🆔 Chat ID:\n"
+                f"<code>{message['chat']['id']}</code>\n\n"
+                f"🆔 Topic ID:\n"
+                f"<code>{message.get('message_thread_id', 'нет')}</code>",
+                message_thread_id=message.get("message_thread_id")
             )
             return
 
         handle_group_message(message)
 
 
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
     if not TOKEN:
         print("ERROR: TELEGRAM_BOT_TOKEN is missing")
         return
 
+    me = get_me()
+
+    if not me:
+        print("ERROR: bot authorization failed")
+        return
+
     print("Bot started")
-    print(f"GROUP_ID: {GROUP_ID or 'NOT SET'}")
-    print(f"GROUP_THREAD_ID: {GROUP_THREAD_ID or 'NOT SET'}")
+    print(f"Bot: @{me.get('username')}")
+    print(f"GROUP_ID: {GROUP_ID}")
+    print(f"GROUP_THREAD_ID: {GROUP_THREAD_ID}")
+    print(f"ADMIN_IDS: {sorted(ADMIN_IDS)}")
+
+    # Создаём/обновляем одну кнопку в теме.
+    ensure_baraholka_button()
 
     offset = 0
 
