@@ -711,6 +711,8 @@ def build_public_post(post):
 
 
 def publish_post(post_id):
+    
+def publish_post(post_id):
     post = user_posts.get(post_id)
 
     if not post:
@@ -719,8 +721,59 @@ def publish_post(post_id):
     public_text = build_public_post(post)
     photos = post.get("photos", [])
 
-    if photos:
-        result = send_photo(
+    if len(photos) >= 2:
+        media = []
+
+        for i, photo_id in enumerate(photos[:10]):
+            item = {
+                "type": "photo",
+                "media": photo_id,
+            }
+
+            if i == 0:
+                if len(public_text) <= 1024:
+                    item["caption"] = public_text
+
+            media.append(item)
+
+        result = api(
+            "sendMediaGroup",
+            {
+                "chat_id": GROUP_ID,
+                "message_thread_id": GROUP_THREAD_ID,
+                "media": json.dumps(
+                    media,
+                    ensure_ascii=False
+                ),
+            }
+        )
+
+        if not result or not result.get("ok"):
+            return result
+
+        # Если текст длиннее лимита подписи,
+        # отправляем его отдельным сообщением.
+        if len(public_text) > 1024:
+            send_message(
+                GROUP_ID,
+                public_text,
+                message_thread_id=GROUP_THREAD_ID,
+            )
+
+        # Кнопку отправляем отдельным сообщением:
+        # Telegram не поддерживает inline-кнопки
+        # непосредственно под альбомом sendMediaGroup.
+        send_message(
+            GROUP_ID,
+            "📢 Подать объявление в барахолку:",
+            baraholka_button(),
+            GROUP_THREAD_ID,
+        )
+
+        return result
+
+    if len(photos) == 1:
+        return send_photo(
             GROUP_ID,
             photos[0],
             caption=public_text,
@@ -728,29 +781,13 @@ def publish_post(post_id):
             message_thread_id=GROUP_THREAD_ID,
         )
 
-        if not result or not result.get("ok"):
-            return result
-
-        for photo_id in photos[1:]:
-            extra = send_photo(
-                GROUP_ID,
-                photo_id,
-                message_thread_id=GROUP_THREAD_ID,
-            )
-
-            if not extra or not extra.get("ok"):
-                print(
-                    "WARNING: не удалось опубликовать дополнительное фото"
-                )
-
-        return result
-
     return send_message(
         GROUP_ID,
         public_text,
         baraholka_button(),
         GROUP_THREAD_ID,
     )
+
 
 
 def send_moderation(user_id):
