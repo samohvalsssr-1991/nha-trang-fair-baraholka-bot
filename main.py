@@ -710,7 +710,7 @@ def build_public_post(post):
     return result
 
 
-def publish_post(post_id):
+
     
 def publish_post(post_id):
     post = user_posts.get(post_id)
